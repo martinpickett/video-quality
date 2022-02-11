@@ -193,13 +193,13 @@ def main():
 
 	# Quality metrics dictionary
 	# Key: Display Name; Value: [command, csv_name, csv_column, accuracy, values]
-	qualityMetrics = {"VMAF": ["", "vmaf", 0, 2, []]}
+	qualityMetrics = {"VMAF": ["", "vmaf", 0, 2]}
 	if args.psnr:
-		qualityMetrics["PSNR"] = [":psnr=1", "psnr", 0, 2, []]
+		qualityMetrics["PSNR"] = [":psnr=1", "psnr", 0, 2]
 	if args.ssim:
-		qualityMetrics["SSIM"] = [":ssim=1", "ssim", 0, 4, []]
+		qualityMetrics["SSIM"] = [":ssim=1", "ssim", 0, 4]
 	if args.ms_ssim:
-		qualityMetrics["MS-SSIM"] = [":ms_ssim=1", "ms_ssim", 0, 4, []]
+		qualityMetrics["MS-SSIM"] = [":ms_ssim=1", "ms_ssim", 0, 4]
 		
 	# Verify output files do not already exist
 	vmafOut = []
@@ -277,56 +277,72 @@ def main():
 		print()
 		print(" ".join(map(lambda x: shlex.quote(x), ffmpegCommand)))
 		print()
-		if args.dry_run:
-			continue
-		else:
-			a = run(ffmpegCommand)
+# 		if args.dry_run:
+# 			continue
+# 		else:
+# 			a = run(ffmpegCommand)
 
-		# Calculate Average Quality Metrics
-		#----------------------------------
-		#
-		with open(vmafOut[i], "r") as csvFile:
+	# Calculate Average Quality Metrics
+	#----------------------------------
+	#
+	fileDictionary = {}
+	for f in vmafOut:
+		# Create empty resultsDictionary
+		resultsDictionary = {}
+		for key in qualityMetrics:
+			resultsDictionary[key] = [0,[]]
+
+		# open vmafFile and read as a csv
+		with open(f, "r") as csvFile:
 			csvReader = csv.reader(csvFile, delimiter = ',')
 
-			# Find column index for quality values
+			# extract column header row
 			columnNames = []
 			for row in csvReader:
 				columnNames = row
 				break
+
+			# Find column index for each quality values
 			toRemove = []
-			for key, value in qualityMetrics.items():
+			for key, value in resultsDictionary.items():
 				try:
-					value[2] = columnNames.index(value[1])
+					value[0] = columnNames.index(qualityMetrics[key][1])
 				except:
 					print(f"Warning: Could not find {key} in results")
 					toRemove.append(key)
 					
 			# Remove quality metrics not detected in output file
 			for i in toRemove:
-				qualityMetrics.pop(i)
+				resultsDictionary.pop(i)
 
-			# Read CSV file and fill empty arrays in qualityMetrics dictionary
+			# Read rest of CSV file and store results
 			for row in csvReader:
-				for value in qualityMetrics.values():
-					q = row[value[2]].strip()
+				for value in resultsDictionary.values():
+					q = row[value[0]].strip()
 					try:
 						q = float(q)
-						value[4].append(q)
+						value[1].append(q)
 					except:
 						pass
+
+			# Store resultsDictionary in fileDictionary
+			fileDictionary[f.replace("-quality.csv","")] = resultsDictionary
 			
-			# Calculate and print quality averages
-			print()
-			for key, value in qualityMetrics.items():
-				if len(value[4]) == 0:
-					continue
-				value[4].sort()
-				meanQuality = sum(value[4]) / len(value[4])
-				nthPercentileIndex = int(0.05 * len(value[4]))
-				nthPercentileValue = value[4][nthPercentileIndex]
-				a = f"Mean Average {key}:".ljust(22)
-				b = f"{meanQuality:<10.{value[3]}f}".ljust(12)
-				print(f"{a}{b}5th Percentile: {nthPercentileValue:.{value[3]}f}")
+	# Calculate and print quality averages
+	print()
+	for filename, results in fileDictionary.items():
+		print(filename)
+		for key, value in results.items():
+			if len(value[1]) == 0:
+				continue
+			value[1].sort()
+			meanQuality = sum(value[1]) / len(value[1])
+			nthPercentileIndex = int(0.05 * len(value[1]))
+			nthPercentileValue = value[1][nthPercentileIndex]
+			precision = qualityMetrics[key][3]
+			a = f"Mean Average {key}:".ljust(22)
+			b = f"{meanQuality:<10.{precision}f}".ljust(12)
+			print(f"{a}{b}5th Percentile: {nthPercentileValue:.{precision}f}")
 
 			
 
