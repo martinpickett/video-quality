@@ -24,6 +24,9 @@ Input Options:
 -n,   --dry-run             print FFmpeg command and exit
       --position SECONDS    the time in the reference video to start from
       --duration SECONDS    duration of clip from reference video
+      --clip-distorted-videos
+                            apply position and duration arguments to both
+                                reference and distorted videos
       --crop WIDTH:HEIGHT:X:Y
                             crop value of distorted video relative to reference
                                 video. TOP:BOTTOM:LEFT:RIGHT crop format also
@@ -62,6 +65,7 @@ def main():
 	parser.add_argument("-r", "--reference", type=str)
 	parser.add_argument("--position", type=int)
 	parser.add_argument("--duration", type=int)
+	parser.add_argument("--clip-distorted-videos", action="store_true", default=False)
 	parser.add_argument("--crop", type=str)
 	parser.add_argument("--psnr", action="store_true", default=False)
 	parser.add_argument("--ssim", action="store_true", default=False)
@@ -251,7 +255,12 @@ def main():
 		ffmpegCommand = [ "ffmpeg", "-hide_banner", "-v", "fatal", "-stats" ]
 	
 		# FFmpeg command distorted input
-		distortedInput = [ "-i", f ]
+		distortedInput = []
+		if args.position and args.clip_distorted_videos:
+			distortedInput += [ "-ss", str(args.position) ]
+		if args.duration and args.clip_distorted_videos:
+			distortedInput += [ "-t", str(args.duration) ]
+		distortedInput += [ "-i", f ]
 		ffmpegCommand += distortedInput
 	
 		# FFmpeg command reference input
@@ -277,10 +286,10 @@ def main():
 		print()
 		print(" ".join(map(lambda x: shlex.quote(x), ffmpegCommand)))
 		print()
-# 		if args.dry_run:
-# 			continue
-# 		else:
-# 			a = run(ffmpegCommand)
+		if args.dry_run:
+			continue
+		else:
+			a = run(ffmpegCommand)
 
 	# Calculate Average Quality Metrics
 	#----------------------------------
