@@ -144,7 +144,27 @@ def main():
 		distLength[i] = float(check_output([ "ffprobe", "-v", "quiet", "-i", f, "-select_streams", "v:0", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1" ]))
 		distWidth[i] = int(check_output([ "ffprobe", "-v", "error", "-i", f, "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "default=noprint_wrappers=1:nokey=1" ]))
 		distHeight[i] = int(check_output([ "ffprobe", "-v", "error", "-i", f, "-select_streams", "v:0", "-show_entries", "stream=height", "-of", "default=noprint_wrappers=1:nokey=1" ]))
-	
+
+	# detirmine if reference video is too big (> 4K) and which vmaf model to use
+	vmafWidth = 0
+	vmafHeight = 0
+	if refWidth <= 1920 and refHeight <= 1080:
+		vmafWidth = 1920
+		vmafHeight = 1080
+	elif refWidth <= 3840 and refHeight <= 2160:
+		vmafWidth = 3840
+		vmafHeight = 2160
+		print()
+		print("Warning: reference video has a greater resolution than FHD and so for accurate")
+		print("VMAF scores you need to use a 4K vmaf model with the \"--model\" argument")
+		print()
+	else:
+		exit("Reference video resolution is greater than 1920 by 1080 (FHD), and unsupported")
+
+	# Check if distorted video is bigger than reference video
+	for i, (w, h) in enumerate(zip(distWidth, distHeight)):
+		if w > refWidth or h > refHeight:
+			exit(f"Distorted video \"{args.file[i]}\" has a higher resolution than the reference video")
 	
 	#################################
 	##### ARGUMENT VERIFICATION #####
@@ -158,9 +178,8 @@ def main():
 		exit()
 
 	# Convert between HandBrake and FFmpeg style crops if necessary
-	cropString = f"{refWidth}:{refHeight}:0:0"
+	crop = [refWidth, refHeight, 0, 0]
 	if args.crop:
-		crop = [0]*4
 		max_x = refWidth/4
 		max_y = refHeight/4
 		pattern = re.compile("([0-9]+):([0-9]+):([0-9]+):([0-9]+)")
@@ -180,14 +199,15 @@ def main():
 				crop[3] = y
 		else:
 			exit(f"Invalid crop: {args.crop}")
-		cropString = f"{crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}"
-		
-		# Check if detected crop is different from distorted videos size
-		for i, (W, H) in enumerate(zip(distWidth, distHeight)):
-			if crop[0] != W or crop[1] != H:
-				print(f"Crop mismatch between reference video and distorted video: {args.file[i]}")
-				print(f"Reference video: {crop[0]}x{crop[1]}")
-				print(f"Distorted video: {W}x{H}")
+
+		# Check if crop and distorted videos have the same aspect ratio
+		cropAspectRatio = crop[0] / crop[1]
+		for i, (w, h) in enumerate(zip(distWidth, distHeight)):
+			distAspectRatio = w / h
+			if cropAspectRatio != distAspectRatio:
+				print(f"Aspect ratio mismatch between crop and distorted video: {args.file[i]}")
+				print(f"Crop aspect ratio: {cropAspectRatio}")
+				print(f"Distorted video aspect ratio: {distAspectRatio}")
 				exit()
 
 	# Verify model file exists
@@ -223,10 +243,19 @@ def main():
 		# --------------------
 		# 
 		# Distorted video filters
-		distortedVideoPrep = "[0:v]setpts=PTS-STARTPTS[dist]; "
+		if distWidth[i] < vmafWidth:
+			distortedVideoPrep = f"[0:v]scale={vmafWidth}:{vmafHeight}:flags=bicubic:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS[dist]; "
+		else:
+			distortedVideoPrep = "[0:v]setpts=PTS-STARTPTS[dist]; "
+
 
 		# Reference video filters
-		referenceVideoPrep = "[1:v]crop=" + cropString + ",setpts=PTS-STARTPTS[ref]; "
+		cropString = f"{crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}"
+		if crop[0] < vmafWidth:
+			referenceVideoPrep = f"[1:v]crop={cropString},scale={vmafWidth}:{vmafHeight}:flags=bicubic:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS[ref]; "
+		else:
+			referenceVideoPrep = f"[1:v]crop={cropString},setpts=PTS-STARTPTS[ref]; "
+
 
 		# VMAF filter string
 		vmafFilterString = f"[dist][ref]libvmaf=log_fmt=csv:log_path={vmafOut[i]}"
@@ -277,7 +306,7 @@ def main():
 		ffmpegCommand += filterInput
 	
 		# FFmpeg command output
-		outputCommands = [ "-f", "null", "-" ]
+		outputCommands = [ "-an", "-f", "null", "-" ]
 		ffmpegCommand += outputCommands
 
 		# Run FFmpeg Command
@@ -291,6 +320,15 @@ def main():
 		else:
 			a = run(ffmpegCommand)
 
+	# If dry run end script
+	if args.dry_run:
+		exit()
+
+
+	###########################
+	##### POST PROCESSING #####
+	###########################
+	# 
 	# Calculate Average Quality Metrics
 	#----------------------------------
 	#
